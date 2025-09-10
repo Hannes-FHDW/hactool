@@ -1,14 +1,18 @@
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 
 jobs:
   main:
     strategy:
       fail-fast: false
       matrix:
-        job_name: ['linux', 'windows', 'macos']
+        job_name: ['linux', 'linux-arm64', 'windows', 'macos']
 
         include:
         - job_name: linux
+          os: ubuntu-latest
+          shell: bash {0}
+
+        - job_name: linux-arm64
           os: ubuntu-latest
           shell: bash {0}
 
@@ -36,13 +40,28 @@ jobs:
         update: true
         install: mingw-w64-x86_64-gcc mingw-w64-x86_64-make
 
-    - uses: actions/checkout@v1
+    - name: Install ARM64 cross-compilation tools
+      if: matrix.job_name == 'linux-arm64'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu
+
+    - uses: actions/checkout@v4
 
     - run: |
         mv config.mk.template config.mk
+        if [ "${{ matrix.job_name }}" = "linux-arm64" ]; then
+          # Set cross-compilation environment for ARM64
+          sed -i 's/CC = gcc/CC = aarch64-linux-gnu-gcc/' config.mk
+          sed -i 's/LDFLAGS = -lmbedtls -lmbedx509 -lmbedcrypto/LDFLAGS = -static -lmbedtls -lmbedx509 -lmbedcrypto/' config.mk
+          # Cross-compile mbedtls for ARM64
+          CC=aarch64-linux-gnu-gcc make -C mbedtls lib
+        else
+          make -C mbedtls lib
+        fi
         make -j$(nproc)
 
-    - uses: actions/upload-artifact@v2
+    - uses: actions/upload-artifact@v4
       with:
         name: hactool-${{ matrix.job_name }}
         path: hactool*
